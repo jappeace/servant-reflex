@@ -9,7 +9,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE PolyKinds             #-}
-{-# LANGUAGE RankNTypes            #-} -- Temporary
+{-# LANGUAGE RankNTypes            #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
 {-# LANGUAGE TupleSections         #-}
 {-# LANGUAGE TypeApplications      #-}
@@ -19,31 +19,34 @@
 
 module Servant.Reflex.RequestAPI where
 
-import           Control.Arrow (first, second)
+import           Control.Arrow               (first, second)
 import           Control.Lens
+import qualified Data.ByteString.Lazy        as BL
+import           Data.CaseInsensitive        (mk)
 import           Data.Generics.Product
+import qualified Data.List                   as L
+import qualified Data.Map                    as M
+import           Data.Maybe                  (catMaybes)
 import           Data.Proxy
-import           Data.CaseInsensitive    (mk)
-import qualified Data.List as L
-import qualified Data.Map as M
-import           Data.Maybe (catMaybes)
-import           Data.Semigroup ((<>))
-import qualified Data.Set as Set
-import qualified Data.Text.Encoding as E
-import           Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.ByteString.Lazy as BL
+import           Data.Semigroup              ((<>))
+import qualified Data.Set                    as Set
+import           Data.Text                   (Text)
+import qualified Data.Text                   as T
+import qualified Data.Text.Encoding          as E
 import           GHC.Generics
-import           GHC.TypeLits (KnownSymbol, symbolVal)
-import Reflex hiding (HList(..))
-import Language.Javascript.JSaddle (MonadJSM)
-import Servant.API hiding (HList(..))
-import Servant.Common.Req hiding (QueryPart(..))
-import Servant.Common.BaseUrl
+import           GHC.TypeLits                (KnownSymbol, symbolVal)
+import           Language.Javascript.JSaddle (MonadJSM)
+import           Reflex                      hiding (HList (..))
+import           Reflex.Dom.Old
+import           Reflex.Dom.Xhr
+import           Servant.API                 hiding (HList (..))
+import           Servant.Client.Core         (EmptyClient)
+import           Servant.Common.BaseUrl
+import           Servant.Common.Req          hiding (QueryPart (..))
 
-import Reflex.Dom hiding (HList(..))
+import           Reflex.Dom.Widget           hiding (HList (..))
 
-import Servant.Reflex         (BuildHeaderKeysTo (..), toHeaders)
+import           Servant.Reflex              (BuildHeaderKeysTo (..), toHeaders)
 
 {-
 TODO:
@@ -97,7 +100,7 @@ class HasClientR t (m :: * -> *) api (f :: * -> *) where
 --   type EOutput t m Raw f = XhrResponse
 
 --   mkReq (HCons (XhrRequest method url conf) NHil) =
---     ReqR method 
+--     ReqR method
 
 
 -- | A class for generating endpoint-level API client functions
@@ -393,7 +396,7 @@ instance (SupportsServantReflex t m,
           Applicative f
          ) => EndpointR t m (Description desc :> sublayout) f where
 
-  type EInputs t m (Descriptiok desc :> sublayout) f = EInputs t m sublayout f
+  type EInputs t m (Description desc :> sublayout) f = EInputs t m sublayout f
   type EOutput t m (Description desc :> sublayout) f = EOutput t m sublayout f
 
   mkReq   = mkReq @t @m @sublayout @f

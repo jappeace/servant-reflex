@@ -6,28 +6,30 @@
 {-# LANGUAGE TypeFamilies      #-}
 {-# LANGUAGE TypeOperators     #-}
 
-import           Control.Monad.IO.Class            (liftIO)
+import           Control.Monad.IO.Class (liftIO)
+import           Control.Monad.Reader   (reader)
 import           Data.Aeson
 import           Data.Bool
-import           Data.Char                         (toUpper)
-import qualified Data.List                         as L
-import           Data.Maybe                        (fromMaybe)
+import           Data.Char              (toUpper)
+import qualified Data.List              as L
+import           Data.Maybe             (fromMaybe)
 import           Data.Monoid
 import           Data.Proxy
-import           Data.Text                         hiding (head, length, map,
-                                                    null, toUpper)
-import qualified Data.Text                         as T
-import qualified Data.Text.IO                      as T
+import           Data.Text              hiding (head, length, map, null,
+                                         toUpper)
+import qualified Data.Text              as T
+import qualified Data.Text.IO           as T
 import           GHC.Generics
-import           Snap.Core                         hiding (addHeader)
+import           Snap.Core              hiding (addHeader)
 import           Snap.Http.Server
 
 import           Servant
-import           Servant.Server ()
+import           Servant.Server         ()
 import           System.Directory
 -- import           Snap.Util.FileServe
 import           API
-import           Snap                              hiding (addHeader)
+import           Snap                   hiding (addHeader)
+import           System.Environment     (lookupEnv)
 
 -- * Example
 
@@ -41,7 +43,7 @@ instance ToJSON Greet
 testApi :: Proxy API
 testApi = Proxy
 
-data App = App
+data App = App { appStaticDir :: String }
 
 -- Server-side handlers.
 --
@@ -77,6 +79,9 @@ server = return () :<|> return 100 :<|> dblint :<|> sayhi :<|> dbl
           req <- getRequest
           liftIO $ putStrLn (show req)
           return 101
+        statics = do
+          staticDir <- reader appStaticDir
+          serveDirectory staticDir
 
 -- Turn the server into a WAI app. 'serve' is provided by servant,
 -- more precisely by the Servant.Server module.
@@ -91,7 +96,7 @@ initApp = makeSnaplet "myapp" "example" Nothing $ do
   addRoutes [("", test)
             ,("", serveDirectory "static")
             ]
-  return App
+  return (App staticDir)
 
 -- Put this all to work!
 main :: IO ()
