@@ -222,3 +222,14 @@ all parameters taken together as a request; when `f` is `ZipList`, the Nth
 elemens of each parameters list will be taken together as a request). Using
 this interface, you can trigger many XHR's from a single event occurence, and
 expect the responses to be structured the same way as the requests.
+
+
+# Refactor idea
+
+Build a function in servant interpetation classes that parses the tag into a request,
+use that fucntion to make the request on dispatch.
+The classes also peel of the layers of the tupple, they describe how by constructing
+that function ending up with the request
+
+so we can't read from the event in steps, it has to be done in one go,
+because splitting events means it'd be hard to unify them.

@@ -132,91 +132,84 @@ qParamToQueryPart QNone             = Right Nothing
 qParamToQueryPart (QParamInvalid e) = Left e
 
 
-data QueryPart t = QueryPartParam  (Dynamic t (Either Text (Maybe Text)))
-                 | QueryPartParams (Dynamic t [Text])
-                 | QueryPartFlag   (Dynamic t Bool)
+data QueryPart = QueryPartParam  ((Either Text (Maybe Text)))
+                 | QueryPartParams ([Text])
+                 | QueryPartFlag   (Bool)
 
 
 -------------------------------------------------------------------------------
 -- The data structure used to build up request information while traversing
 -- the shape of a servant API
-data Req t = Req
+data Req = Req
   { reqMethod    :: Text
-  , reqPathParts :: [Dynamic t (Either Text Text)]
-  , qParams      :: [(Text, QueryPart t)]
-  , reqBody      :: Maybe (Dynamic t (Either Text (BL.ByteString, Text)))
-  , headers      :: [(Text, Dynamic t (Either Text Text))]
+  , reqPathParts :: [(Either Text Text)]
+  , qParams      :: [(Text, QueryPart)]
+  , reqBody      :: Maybe ((Either Text (BL.ByteString, Text)))
+  , headers      :: [(Text, (Either Text Text))]
   , respHeaders  :: XhrResponseHeaders
-  , authData     :: Maybe (Dynamic t (Maybe BasicAuthData))
+  , authData     :: Maybe BasicAuthData
   }
 
-defReq :: Req t
+defReq :: Req
 defReq = Req "GET" [] [] Nothing [] def Nothing
 
-prependToPathParts :: Dynamic t (Either Text Text) -> Req t -> Req t
+prependToPathParts :: Either Text Text -> Req -> Req
 prependToPathParts p req =
   req { reqPathParts = p : reqPathParts req }
 
-addHeader :: (ToHttpApiData a, Reflex t) => Text -> Dynamic t (Either Text a) -> Req t -> Req t
-addHeader name val req = req { headers = (name, (fmap . fmap) (TE.decodeUtf8 . toHeader) val) : headers req }
+addHeader :: (ToHttpApiData a) => Text -> Either Text a -> Req -> Req
+addHeader name val req = req { headers = (name, fmap (TE.decodeUtf8 . toHeader) val) : headers req }
 
 
-reqToReflexRequest
-    :: forall t. Reflex t
-    => Text
-    -> Dynamic t BaseUrl
-    -> Req t
-    -> Dynamic t (Either Text (XhrRequest XhrPayload))
+reqToReflexRequest ::
+    Text
+    -> BaseUrl
+    -> Req
+    -> (Either Text (XhrRequest XhrPayload))
 reqToReflexRequest reqMeth reqHost req =
-  let t :: Dynamic t [Either Text Text]
-      t = sequence $ reverse $ reqPathParts req
+  let t :: [Either Text Text]
+      t = reverse $ reqPathParts req
 
-      baseUrl :: Dynamic t (Either Text Text)
-      baseUrl = Right . showBaseUrl <$> reqHost
+      baseUrl :: Either Text Text
+      baseUrl = Right $ showBaseUrl reqHost
 
-      urlParts :: Dynamic t (Either Text [Text])
-      urlParts = fmap sequence t
+      urlParts :: (Either Text [Text])
+      urlParts = sequence t
 
-      urlPath :: Dynamic t (Either Text Text)
-      urlPath = (fmap.fmap)
+      urlPath :: (Either Text Text)
+      urlPath = fmap
                 (T.intercalate "/" . fmap escape)
                 urlParts
 
-      queryPartString :: (Text, QueryPart t) -> Dynamic t (Maybe (Either Text Text))
-      queryPartString (pName, qp) = case qp of
-        QueryPartParam p -> ffor p $ \case
-          Left e         -> Just (Left e)
-          Right (Just a) -> Just (Right $ pName <> "=" <> escape a)
-          Right Nothing  -> Nothing
-        QueryPartParams ps -> ffor ps $ \pStrings ->
+      queryPartString :: (Text, QueryPart) -> (Maybe (Either Text Text))
+      queryPartString (pName, QueryPartParam (Left e)) = Just (Left e)
+      queryPartString (pName, QueryPartParam (Right (Just a))) = Just (Right $ pName <> "=" <> escape a)
+      queryPartString (pName, QueryPartParam (Right Nothing)) = Nothing
+      queryPartString (pName, QueryPartParams pStrings) = 
           if null pStrings
           then Nothing
           else Just . Right
                . T.intercalate "&"
                $ fmap (\p -> pName <> "=" <> escape p) pStrings
-        QueryPartFlag fl -> ffor fl $ \case
-          True ->  Just $ Right pName
-          False -> Nothing
+      queryPartString (pName, QueryPartFlag True) = Just $ Right pName
+      queryPartString (pName, QueryPartFlag False) = Nothing
 
-
-      queryPartStrings :: [Dynamic t (Maybe (Either Text Text))]
+      queryPartStrings :: [(Maybe (Either Text Text))]
       queryPartStrings = map queryPartString (qParams req)
-      queryPartStrings' = fmap (sequence . catMaybes) $ sequence queryPartStrings :: Dynamic t (Either Text [Text])
-      queryString :: Dynamic t (Either Text Text) =
-        ffor queryPartStrings' $ \qs -> fmap (T.intercalate "&") qs
-      xhrUrl =  (liftA3 . liftA3) (\a p q -> a </> if T.null q then p else p <> "?" <> q)
+      queryPartStrings' = sequence $ catMaybes $ queryPartStrings :: (Either Text [Text])
+      queryString :: (Either Text Text) = fmap (T.intercalate "&") queryPartStrings'
+      xhrUrl =  (liftA3) (\a p q -> a </> if T.null q then p else p <> "?" <> q)
           baseUrl urlPath queryString
         where
           (</>) :: Text -> Text -> Text
           x </> y | ("/" `T.isSuffixOf` x) || ("/" `T.isPrefixOf` y) = x <> y
                   | otherwise = x <> "/" <> y
 
-
-      xhrHeaders :: Dynamic t (Either Text [(Text, Text)])
-      xhrHeaders = (fmap sequence . sequence . fmap f . headers) req
+      xhrHeaders :: (Either Text [(Text, Text)])
+      xhrHeaders = traverse f (headers req :: [(Text, (Either Text Text))])
         where
           f = \(headerName, dynam) ->
-                fmap (fmap (\rightVal -> (headerName, rightVal))) dynam
+                (fmap (\rightVal -> (headerName, rightVal))) dynam
 
       mkConfigBody :: Either Text [(Text,Text)]
                    -> (Either Text (BL.ByteString, Text))
@@ -236,9 +229,9 @@ reqToReflexRequest reqMeth reqHost req =
                       , _xhrRequestConfig_responseHeaders = def
                       }
 
-      xhrOpts :: Dynamic t (Either Text (XhrRequestConfig XhrPayload))
+      xhrOpts :: (Either Text (XhrRequestConfig XhrPayload))
       xhrOpts = case reqBody req of
-        Nothing    -> ffor xhrHeaders $ \case
+        Nothing    -> case xhrHeaders of
                                Left e -> Left e
                                Right hs -> Right $ def { _xhrRequestConfig_headers = Map.fromList hs
                                                        , _xhrRequestConfig_user = Nothing
@@ -247,7 +240,7 @@ reqToReflexRequest reqMeth reqHost req =
                                                        , _xhrRequestConfig_sendData = ""
                                                        , _xhrRequestConfig_withCredentials = False
                                                        }
-        Just rBody -> liftA2 mkConfigBody xhrHeaders rBody
+        Just rBody -> mkConfigBody xhrHeaders rBody
 
       mkAuth :: Maybe BasicAuthData -> Either Text (XhrRequestConfig x) -> Either Text (XhrRequestConfig x)
       mkAuth _ (Left e) = Left e
@@ -256,40 +249,31 @@ reqToReflexRequest reqMeth reqHost req =
         { _xhrRequestConfig_user     = Just $ TE.decodeUtf8 u
         , _xhrRequestConfig_password = Just $ TE.decodeUtf8 p}
 
-      addAuth :: Dynamic t (Either Text (XhrRequestConfig x))
-              -> Dynamic t (Either Text (XhrRequestConfig x))
-      addAuth xhr = case authData req of
-        Nothing -> xhr
-        Just auth -> liftA2 mkAuth auth xhr
+      addAuth :: Either Text (XhrRequestConfig x)
+              -> Either Text (XhrRequestConfig x)
+      addAuth xhr = mkAuth (authData req) xhr
 
-      xhrReq = (liftA2 . liftA2) (\p opt -> XhrRequest reqMeth p opt) xhrUrl (addAuth xhrOpts)
+      xhrReq = liftA2 (\p opt -> XhrRequest reqMeth p opt) xhrUrl (addAuth xhrOpts)
 
   in xhrReq
 
 -- * performing requests
-
 displayHttpRequest :: Text -> Text
 displayHttpRequest httpmethod = "HTTP " <> httpmethod <> " request"
 
 -- | This function performs the request
-performRequests :: forall t m f tag.(SupportsServantReflex t m, Traversable f)
+performRequests :: forall t m f.(SupportsServantReflex t m, Traversable f)
                 => Text
-                -> Dynamic t (f (Req t))
                 -> Dynamic t BaseUrl
                 -> ClientOptions
-                -> Event t tag
-                -> m (Event t (tag, f (Either Text XhrResponse)))
-performRequests reqMeth rs reqHost opts trigger = do
-  let xhrReqs =
-          join $ (\(fxhr :: f (Req t)) -> sequence $
-                     reqToReflexRequest reqMeth reqHost <$> fxhr) <$> rs
+                -> Event t (f Req)
+                -> m (Event t (f (Either Text XhrResponse)))
+performRequests reqMeth reqHost opts trigger = do
+  performSomeRequestsAsync opts xhrEvt 
+  where
+    xhrEvt = attachWith (\beh -> fmap (reqToReflexRequest reqMeth beh)) (current reqHost) trigger 
 
-      -- xhrReqs = fmap snd <$> xhrReqsAndDebugs
-      reqs    = attachPromptlyDynWith
-                (\fxhr t -> Compose (t, fxhr)) xhrReqs trigger
-
-  resps <- performSomeRequestsAsync opts reqs
-  return $ getCompose <$> resps
+    
 
 -- | Issues a collection of requests when the supplied Event fires.
 -- When ALL requests from a given firing complete, the results are
@@ -345,7 +329,7 @@ performRequestsCT
         MimeUnrender ct a, Traversable f)
     => Proxy ct
     -> Text
-    -> Dynamic t (f (Req t))
+    -> Dynamic t (f (Req))
     -> Dynamic t BaseUrl
     -> ClientOptions
     -> Event t tag
@@ -369,7 +353,7 @@ performRequestsNoBody
     :: (SupportsServantReflex t m,
         Traversable f)
     => Text
-    -> Dynamic t (f (Req t))
+    -> Dynamic t (f (Req))
     -> Dynamic t BaseUrl
     -> ClientOptions
     -> Event t tag
